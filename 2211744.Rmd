@@ -1,0 +1,812 @@
+---
+title: "MA331-Report: 2211744"
+author: "Karunaratne, Mahawattege Dona Dilshani Nimeshika"
+subtitle: TED Talks by Speaker JR and Speaker Hugh Evans
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+### Don't delete this setup code chunk from your file
+knitr::opts_chunk$set(echo = FALSE, message = FALSE , warning = FALSE, comment = NULL)   ## DON'T ALTER THIS: this is to prevent printing the code or any unnecessary addition in your final "html" report file.
+#knitr::opts_chunk$set(echo = FALSE, warning = FALSE, comment = NULL)
+
+# You can extend this list below to load all the packages required for your analyses:
+#====================================================================================
+
+#Please install the packages if not already installed unless it will not render the html file. It is not suggested to keep install.packages commands in r markdown file.
+#First, loads several data analysis and visualization packages, including dplyr, tidyverse, and plotly. These packages contain numerous functions and tools for data processing, visualization, and analysis.
+#install.packages("rlang")
+#install.packages("kableExtra")
+#install.packages("tidyr", dependencies = TRUE)
+#install.packages("vctrs")
+library(rlang)
+library(dplyr)
+library(gridExtra) 
+library(dplyr)
+library(tidyverse)
+library(tidytext)
+library(stopwords)
+library(ggrepel)
+library(scales)
+library(plotly)
+#library(dsEssex)
+library(textdata)
+library(knitr)
+library(kableExtra)
+library(tidyr)
+library(vctrs)
+
+
+# load the 'ted_talks' data
+#=========================
+#As dsEssex library cannot be loaded in personal laptop, below is the method I loaded the ted_talks data set.
+load("C:/Users/Dilshani/OneDrive - University of Essex/MA331/Assignment/ted_talks.rda")
+#load("C:/Users/dm22824/OneDrive - University of Essex/MA331/Assignment/ted_talks.rda")
+glimpse(ted_talks)
+#data(ted_talks)
+#glimpse(ted_talks)
+
+```
+
+
+## Introduction
+
+
+This report is going to analyse the ted_talks data set, specifically the TED talks of "JR" and "Hugh Evans". Let’s first explore the complete data set. It has columns for talk_id, headline, text, speaker, and views. Following is a simple summary of the complete data set.
+
+
+```{r, table1,  message=FALSE, warning=FALSE}
+
+#First, I'm creating a data frame to get the list of unique speakers.
+unique_speakers<- 
+  #Use the loaded ted_talks data set to filter the data
+  ted_talks %>%
+  #Use dplyr's pipe function to refer the steps. Select only the "speaker" column.
+  select(speaker) %>%
+  #Use unique function to avoid duplicates.
+  unique()
+
+#Create a variable to count the number of speakers.Use count function on unique_speakers data frame. 
+speakers_count <-  count(unique_speakers)
+
+#Next I wanted to know how many TED talks are in the data set. Used to count to count the rows of ted_talks data set.
+no_obs<- count(ted_talks)
+
+#To complete my basic summary table, I counted the total number of views.
+total_views <- 
+  #Use complete ted_talks data set
+  ted_talks %>%
+  #Use summarize function 
+  summarize(total_views = sum(views))
+
+# Combine data frames of speakers_count, no_of_obs and total_views.
+#Use bind_row function to combine the data frames. But total_view is a value. Therefore, data.frame function is used to convert all into data frames.
+df <- bind_rows(
+  data.frame(Metric = "Number of speakers involved", Value = speakers_count$n),
+  data.frame(Metric = "Number of TED talks", Value = no_obs$n),
+  data.frame(Metric = "Total Views", Value = total_views$total_views)
+)
+
+# Print a table with the data from above data frame. To print a table in rmarkdown, I used the kable function from 'knitr' package. 
+#I basically have to enter the data frame name, output type - "html", "pdf", etc.
+#In order to output a clear and nice table, attributes like align - alignments of each column, col.names - vector of the column names.
+#I used kable_styling from 'kableExtra' package to add more effects to the table. It included attributes like position - which can be left, right and center, bootstrap_options - I can add bootstrap CSS classes such as the effects I want like changing row colors when hovering, two row colors by using "striped".
+#row spec() is a kableExtra package method that allows users to add style to certain rows in the table.
+#The range of rows to which the style should be applied is specified by 1:nrow(df) which is the complete table in this.
+#The additional css option is used to create custom CSS to be applied to the selected rows like in this I have set height of the first row to 20 pixels.
+#pipe is used to to follow the methods.
+kable(df, "html", align = "lr", col.names = c("Measure", "Counts")) %>%
+  kable_styling(position = "center", bootstrap_options = c("striped", "hover")) 
+
+
+```
+
+Now, let's take look at who have given the most number of the TED talks in this data set. Below are the top 5 speakers.
+
+```{r, table2, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+#In this chunk I'm getting a list of speakers.
+#First I create the df "speakers" to assign the list of speakers from ted_talks.
+speakers <-
+  #Refer the ted_talks df
+  ted_talks %>%
+  #Select speaker and talk_id. talk_id is selected in order to sort the speakers with highest number of TED talks.
+  select(speaker, talk_id) %>%
+  #group_by is used to support the next count function to count the unique values for speakers.
+  group_by(speaker) %>%
+  #count the total of unique speakers and sort them in descending order
+  count(speaker, sort = TRUE) %>%
+  #ungroup() is used to avoid future conflicts if I use the "speakers" df in next codes.
+  ungroup()
+
+
+#Same as in previous chunk, kable is used to print the table in r markdown.
+#Here I have only selected the range of first five rows of the "speakers" df by using speakers[1:5,]. But all the columns are printing.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(speakers[1:5,], "html", align = "lr", col.names = c('Speaker', 'Number of TED talks')) %>%
+    kable_styling(position = "center" , bootstrap_options = c("striped", "hover"))
+```
+
+
+Next, we can check the most viewed topics of the speakers. Below is the hot 5 topics.
+
+```{r, table3, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+
+#Next I wanted to get a list of speakers and their topics with most views.
+#First I create the df "speakers" to assign the list of speakers from ted_talks.
+speaker_with_most_views <-
+  #Refer ted_talks df to select required values.
+  ted_talks %>%
+  #Select speaker and headline to uniquely identify each TED talk and select view to sort according to most views.
+  select(speaker, headline, views) %>%
+  #group_by is used to support the next count function to count the unique values for speaker and their TED talk.
+  group_by(speaker, headline) %>%
+  #sort according to views in descending order.
+  arrange(desc(views)) %>%
+  #ungroup() is used to avoid future conflicts if I use the "speaker_with_most_views" df in next codes.
+  ungroup()
+
+
+#Same as in previous chunk, kable is used to print the table in r markdown.
+#Here I have only selected the range of first five rows of the "speaker_with_most_views" df by using speaker_with_most_views[1:5,]. But all the columns are printing.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(speaker_with_most_views[1:5,], align = "llr", col.names = c('Speaker', 'Topic', 'Views'))%>%
+    kable_styling(position = "center" , bootstrap_options = c("striped", "hover"))
+
+
+#Unique topics
+#topics <-
+ # ted_talks %>%
+  #select(headline) %>%
+  #unique()
+
+#topics %>% slice_head(n = 10)
+```
+
+As stated at the beginning, in this report I'm going to analyze TED talks by JR and Hugh Evans. Let's have a look at how many TED talks have been conducted by each speaker.
+
+```{r, table4, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+
+#Next, I wanted to count the number of TED talks by JR, which is the first speaker assigned to me to analyze. 
+#I create the df "JR" to assign the list of TED talks by JR from from ted_talks data frame.
+JR <-
+  #Refer ted_talks df to select required values.
+  ted_talks %>%
+  #Use filter to select rows where speaker column is equal to "JR".
+  filter(speaker == "JR")
+
+
+#I wanted to count the number of TED talks by JR, which is the first speaker assigned to me to analyze. 
+#I create the df "Hugh_Evans" to assign the list of TED talks by Hugh Evans from from ted_talks data frame.
+Hugh_Evans <-
+  #Refer ted_talks df to select required values.
+  ted_talks %>%
+  #Use filter to select rows where speaker column is equal to "Hugh Evans".
+  filter(speaker == "Hugh Evans")
+
+#Combine above data frames to get one data frame using bind_rows because columns in both data frames are the same and assinged it to "talks" data frame.
+#As I only used "filter" function creating above data frames, I have all the columns which are in ted_talks in the new "talks" data frame as well. 
+talks <- bind_rows(JR, Hugh_Evans)
+
+
+#Now I can use "talks" data frame to count the number of TED talks for both speakers.
+#I create the data frame "talks_per_hour" to assign the speaker and it's count of TED talks.
+talks_per_speaker <-
+  #Refer talks data frame to to count the number of TED talks.
+  talks %>%
+  #group_by is used to support the next count function to count the unique values for speaker.
+  group_by(speaker) %>%
+  #count the number of rows for each speaker.
+  count(speaker) %>%
+  #ungroup() is used to avoid future conflicts if I use the "talks_per_speaker" df in next codes.
+  ungroup()
+
+#Same as in previous chunk, kable is used to print the table in r markdown.
+#Here I have only selected the range of first five rows of the "talks_per_speaker" df by using talks_per_speaker[1:5,]. But all the columns are printing.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(talks_per_speaker, align = "lr", col.names = c('Speaker', 'Number of ted talks'))%>%
+    kable_styling(position = "center" , bootstrap_options = c("striped", "hover"))
+```
+
+
+
+## Methods
+
+<!-- Here you should **describe** the steps/procedures that you will be following, the statistical summary measures that you will use to compare results, and the visualization that you will produce. -->
+
+As the data set has few columns, the number of basic statistical calculations that can be done is limited. Let's try to gain some insights out of view counts. To do this, I grouped the full data set into 'JR and Hugh Evans' and 'All the other speakers'. Here's a box plot of the summaries.
+
+
+```{r plot1, fig.align='center', message=FALSE, warning=FALSE, fig.width = 5, fig.height= 4}
+
+#Now, I'm going to analyze what are the insights I can gain out of the data set.
+
+#First, I'm going to analyze the total views of the two speakers and rest of the speakers.
+#In order to do this, I'm adding a new column to ted_talks data frame and assign it to a new data frame called "full_ted_talks".
+full_ted_talks <-
+  #Refer main ted_talks data frame to continue with the functions.
+  #Use pipe function to apply each function.
+   ted_talks %>%
+  #Filter out ted talks with blank text.
+   filter(text != "") %>%
+  #Use "mutate" to add the new column called "Group".
+  #I am using conditions to add values to the new column. Therefore, I am using case_when function.
+   mutate(Group = case_when(
+     #first case is when speaker value is equal to "JR", add "JR and Hugh Evans" as the value of "Group" column.
+     speaker == 'JR'~ 'JR and Hugh Evans',
+     #Second case is when speaker value is equal to "Hugh Evans", add "JR and Hugh Evans" as the value of "Group" column.
+     speaker == 'Hugh Evans' ~ 'JR and Hugh Evans',
+     #Finally, when it's neither "JR" nor "Hugh Evans" , add "All the other speakers" as the value of "Group" column.
+     TRUE ~ 'All the other speakers')) 
+ 
+#Next, I'm going to plot views of each group by using a box plot.
+#I am using boxplot() function for this. views are lpotted against the Groups. "data" referes to the data frame I am using to plot the box plot. 
+#I specified xlab and ylabs and set outline = FALSE to reduce the outliers.
+boxplot(views ~ Group , data = full_ted_talks, xlab = "Speaker group", ylab = "Views", outline = FALSE) 
+#mtext() function is used to add the title of the plot. Even though I could simply add a main to previous code, I wanted to format the title. Therefore, I used the mtext() function.
+#title text, where it should be positioned by side and line and font size by cex are defined insided the mtext() function.
+mtext("Hugh Evans and JR's views Vs Other speaker's views", side = 3, line = 1, cex = 1)
+
+
+```
+
+
+
+<!-- As the data set does not provide any information about the length of the TED talks, I'm going to look into the length of "text" field which can be considered as a measure of length of the TED talk. -->
+
+<!-- Here's a table of total words of each TED talk considered in this report and their views count. -->
+
+<!-- ```{r, table21, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"} -->
+<!-- views_vs_words_JR_HE <- -->
+<!--   talks %>% -->
+<!--   unnest_tokens(word, text) %>% -->
+<!--   group_by(speaker, headline, views) %>% -->
+<!--   count(word) %>% -->
+<!--   summarize(total_words = n()) %>% -->
+<!--   arrange(desc(views)) -->
+
+<!-- views_vs_words <- -->
+<!--   ted_talks %>%  -->
+<!--   unnest_tokens(word, text) %>% -->
+<!--   group_by(speaker, headline, views) %>%  -->
+<!--   count(word) %>%  -->
+<!--   summarize(total_words = n()) %>%  -->
+<!--   arrange(desc(views)) -->
+
+<!-- summary(views_vs_words$total_words) -->
+
+
+
+<!-- kable(views_vs_words_JR_HE, align = "llll", col.names = c('Speaker', 'Headline', 'Views', 'Total words in transcript'))%>% -->
+<!--     kable_styling(position = 'center') -->
+<!-- ``` -->
+
+<!-- Let's plot it to see if there's any pattern. -->
+
+<!-- ```{r, warning = FALSE, message = FALSE, fig.width = 3, fig.height= 2, fig.align = 'center'} -->
+<!-- #Count words in each TED talk -->
+<!-- talks %>% -->
+<!--   unnest_tokens(word, text) %>% -->
+<!--   group_by(talk_id, speaker, views) %>% -->
+<!--   count(word) %>% -->
+<!--   summarize(total_words = n()) %>% -->
+<!--   arrange(desc(views)) %>% -->
+<!--   ggplot(aes(x=total_words, y= views)) + geom_point() + geom_line() + -->
+<!--   scale_x_continuous("Total Words Count") + -->
+<!--   scale_y_continuous("Views Count") + -->
+<!--   ggtitle("Total Words Count vs Views Count") -->
+
+<!-- ``` -->
+
+<!-- Above plot does not give any important insight if the duration of the TED talks has an impact on the views. -->
+
+
+
+
+
+By looking at the boxplot, we can say the views of JR and Hugh Evan's TED talks are higher than the rest of the speakers' average views.
+Then, I calculated the minimum, average, and maximum view counts of JR, Hugh Evans, and the rest of the speakers.
+
+```{r, table5, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+
+#I would like to present a summary of the views and speakers.
+#I created a new data frame "full_ted_talks_summary" and assigned the summaries of views to this.
+full_ted_talks_summary <-
+  #Use the complete data set of ted_talks
+  ted_talks %>%
+  #filter out TED talks without text
+  filter(text != "") %>%
+  #Create a column called "Group" as explained in previous chunk.
+  mutate(Group = case_when(
+    speaker == 'JR' ~ 'JR',
+    speaker == 'Hugh Evans' ~ 'Hugh Evans' ,
+    TRUE ~ 'All the other speakers'
+  )) %>%
+  #Use unnest_tokens to tokenize the text column into words. This will create a new column called "word" and it will have single words which were in text column. Text column is tokenized by separated it by spaces. 
+  unnest_tokens(word, text, token = "words") %>% 
+  #use anti_join function to remove whatever inside the function from the ted_talks data frame.
+  #get_stopwords() will call all the stop words like "the", "a", etc.
+  #Therefore anti_join and get_stopwords will remove stopwords from the data frame. "Words" will be the column considered by anti_join() function.
+  anti_join(get_stopwords()) %>%
+  #group_by is used to support the next summarise function to calculate the minimum, maximum and averages of the views of each group.
+  group_by(Group) %>%
+  #summarize() function is used to create columns of Maximum, Average and Minimum and assign the value. Respectively max, mean and min functions are used to calculate them. When calculating the missing values are removed using na.rm = TRUE.
+  summarise(Maximum = max(views, na.rm=TRUE), Average = mean(views, na.rm=TRUE ), Minimum = min(views, na.rm=TRUE))%>%
+  #Then the summary data frame is sorted desecndingly by Maximum value.
+  arrange(desc(Maximum))
+
+#Same as in previous chunks, kable is used to print the table in r markdown.
+#Here I have used complete "full_ted_talks_summary" data frame.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(full_ted_talks_summary, align = "lccc", col.names = c('Speaker Group', 'Maximum', 'Average', 'Minimum'))%>%
+    kable_styling(position = "center",  bootstrap_options = c("striped", "hover"))
+
+
+
+```
+
+It shows that the average views of JR's TED talks are higher than other speakers average views, while Hugh Evans's TED talk views are lower than other speakers average. However, JR has the lowest count of views out of JR and Hugh Evans TEDtalks.
+
+Now, let's look at the top words from the two speakers. In order to achieve this output, tidying the data set, tokenizing and removing stop words should be taken place.
+
+```{r, table6, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+
+#For the next part, I want to analyze the vocabulary of the two speaker. First, I'm going to obtain the top words of each speaker.
+#I'm going to tidy the dataset which was created with combining the datasets of each speaker.
+tidy_talks <-  
+  talks %>%
+  #filter out any rows with no text inluded
+  filter(text != "") %>%
+  #Use unnext_tokens() to tokenize the text into words.
+  unnest_tokens(word, text, token = "words") %>%
+  #Use anti_join() and get_stopwords() to remove stopwords from the data set
+  anti_join(get_stopwords())
+
+
+
+#Next, I'm going to select the top words from the tidy data set
+top_words_both_speakers <-
+  #Use the tidy data set
+  tidy_talks %>%
+  #use count() function to count the number of each word repeated. But using "speaker" I can count the occurrences of word spoken by each speaker.
+  count(speaker, word, sort = TRUE) %>%
+  #group_by is used to support the next filter function.
+  group_by(word) %>% 
+  #filter() function restricts the data to words that appear in at least ten conversations. The condition sum(n) > 15 assures that the term appears in at least 15 talks.
+  filter(sum(n) > 15) %>%     
+  #ungroup() is used to avoid future conflicts if I use the "top_words_both_speakers" df in next codes.
+  ungroup() %>%      
+  #pivot_wider() is used to restructure data from a longer to a broader format. The function is being used to modify the data so that we can readily compare the counts of each word used by each speaker side by side.
+  #names from: The column holding the values to be used as column names in the output is specified. 
+  #values from: The column holding the values to be utilised as cell values in the output is specified. The cell values in the output are taken from the column "n" (which holds the count of each word used by each speaker).
+  #values fill: The value that will be used to fill in missing values. In this case, 0 is used to fill in missing values, which implies that if a word is only used by one speaker, the cell for the other speaker will be empty.
+  pivot_wider(names_from = "speaker", values_from = "n", values_fill = 0)
+
+
+#Same as in previous chunks, kable is used to print the table in r markdown.
+#Here I have used top_words_both_speakers as the data frame but used [1:7, ] to get only first 7 rows of the data frame..
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(top_words_both_speakers[1:7,], align = "lcc", col.names = c('Word', 'Hugh Evans', 'JR'))%>%
+    kable_styling(position = "center", bootstrap_options = c("striped", "hover"))
+
+```
+
+Above table shows the top words of Hugh Evans and JR. "People" is the word mostly used by JR, while Hugh Evans has used "global" mostly in their TED talks. Let's visualize the top words of each speaker in a single bar chart. Beside this, the common top words of both speakers are plotted to visualize the frequency and give a more comparative view.
+
+```{r plot2, fig.align='center', fig.height=5, fig.width=8, message=FALSE, warning=FALSE}
+#Now, I'm going to visualize the top words in plots.
+#Even though I could have used the above data frame "top_words_both_speakers", it limits the sum of repeated words to be greater than 15. Yet, I want to further analyze the words used by each speaker.
+#The plot I'm going to create is assigned to "p1".
+p1 <-
+  #I'm using tidy data set to filter the words as it's tokenized.
+  tidy_talks %>%
+  #group_by is used to support the next count function to cout words of each speaker.
+  group_by(speaker) %>%
+  #use count() function to count the number of each word repeated. But using "speaker" I can count the occurrences of word spoken by each speaker.
+  count(speaker, word, sort = TRUE) %>%
+  #slice_max() function is used to specify the number of rows I want.
+  slice_max(n, n = 10) %>%
+  #mutate() and reorder functions are used to reorders the values in the data frame's word column according to the values in the n column to produce a new variable called word.
+  mutate(word = reorder(word, n)) %>%
+  #Next, I'm going to start plotting the bar chart using "ggplot" function by ggplot2 library.
+  #ggplot will create a blank canvas. By using "aes", the aesthetics can be specified like in this I have specified  axis, y axis and fill variable which will be used to set colors based on the levels.
+  ggplot(aes(n, word, fill = speaker)) + 
+  #then I'm creating the bar chart using geom_col(), as I don't want to show the legend, I'm setting it to be FALSe
+  geom_col(show.legend =  FALSE) +
+  #I further want to format the plot. Therefore I used labs() to specify x axis name, y axis name and title of the plot. title.position argument is used to set out the title to be on the center of the plot.
+  labs(x = 'Freuqncy', y = 'Word', title = 'Words Vs. Frequency by JR and Hugh Evans', title.position = "plot") +
+  #I want to plot the top words for each speaker in the same plot but as two bar charts. Therefore, I used facet_grid() function. By specifying rows to use "speaker" variable to set the levels, I have two bar charts in the same plot. facet_grid() is used to produce multiple grids.
+  facet_grid(rows = vars(speaker)) +
+  #scale_color_manual is used to set colors based on the levels specified above.
+  scale_color_manual(values = c("red", "blue")) +
+  #I changed plot's appearance by specifying in a variety of arguments using the theme() method. I have set font size to be 9 and the horizontal justification of the plot title to be centered (hjust = 0.5).
+  theme(plot.title = element_text(hjust = 0.5, size = 9))
+
+
+#I want to compare the common top words of both speaker.
+#For this, I am going to find top words which are common in both speakers.
+#First I'm creating a data set with top words, the speaker and counts of the occurrences.
+word_freq <- 
+  #tokenized tidy data set is used
+  tidy_talks %>%
+  #group_by is used to support the next count function to count words of each speaker.
+  group_by(speaker) %>%
+  #use count() function to count the number of each word repeated. But using "speaker" I can count the occurrences of word spoken by each speaker.
+  count(speaker, word, sort = TRUE) %>%
+  #slice_max() function is used to specify the number of rows I want.
+  slice_max(n, n = 20)
+
+#Next I want a set of words which both speakers have used.
+common_words <- 
+  #use the previously created word_freq data frame
+  word_freq %>%
+  #filter out any words that are empty
+  filter(word != "") %>%
+  #group_by is used to support the next filter function.
+  group_by(word) %>%
+  #The common_words data frame that was previously constructed is then utilized to filter out only those words that are present in both speakers' top 20 terms, have a combined frequency of more than 15, and are used by exactly two speakers.
+  filter(sum(n) > 15 & n_distinct(speaker) == 2) %>%
+  #remove grouping
+  ungroup() %>%
+  #I only wanted to keep the common words used.
+  select(word)
+
+#Finally I'm going to find out common words and occurrences by each speaker. These are assigned to "ted_top_words".
+ted_top_words <- 
+  #using the data set of top words with speaker, word and n columns.
+  word_freq %>%
+  #Then filter out word that are not in common_words data frame.
+  filter(word %in% common_words$word) %>%
+  #group by speaker to sum the counts
+  group_by(speaker) %>%
+  #select only first 10 rows of the data set
+  slice_head(n = 10)
+
+#Now I'm going to plot the common top words. This plot assigned to p2.
+p2 <-
+  #Use the data frame with common top words
+  ted_top_words %>%
+  #mutate() and reorder functions are used to reorders the values in the data frame's word column according to the values in the n column to produce a new variable called word.
+  mutate(word = reorder(word, n)) %>%
+  #Next, I'm going to start plotting the bar chart usng "ggplot" function by ggplot2 library.
+  #ggplot will create a blank canvas. By using "aes", the aesthetics can be specified like in this I have specified  axis, y axis and fill variable which will be used to set colors based on the levels.
+  ggplot(aes(n, word, fill = speaker)) + 
+  #then I'm creating the bar chart using geom_col(), as I don't want to show the legend, I'm setting it to be FALSe
+  geom_col(show.legend =  FALSE) + 
+  #I further want to format the plot. Therefore I used labs() to specify x axis name, y axis name and title of the plot. title.position argument is used to set out the title to be on the center of the plot.
+  labs(x = 'Freuqncy', y = 'Word', title = 'Most commonly used words by JR and Hugh Evans', title.position = 'center' ) +
+  #I want to plot the top words for each speaker in the same plot but as two bar charts. Therefore, I used facet_grid() function. By specifying rows to use "speaker" variable to set the levels, I have two bar charts in the same plot. facet_grid() is used to produce multiple grids.
+  facet_grid(rows = vars(speaker)) +
+  #scale_color_manual is used to set colors based on the levels specified above.
+  scale_color_manual(values = c("red", "blue")) +
+  #I changed plot's appearance by specifying in a variety of arguments using the theme() method. I have set font size to be 9 and the horizontal justification of the plot title to be centered (hjust = 0.5).
+  theme(plot.title = element_text(hjust = 0.5, size = 9))
+
+
+#I wanted to have the above two plots side by side. Therefore, I am using grid.arrange function to combine the plots side by side.
+#p1 and p2 plots are specified to be placed sided by side in the same and in 2 columns.
+grid.arrange(p1, p2, ncol = 2)
+```
+
+The graphs depict that "world" and "one" are the common words that have been used most frequently by both speakers. Moreover, the bar chart displays that JR has used those words more commonly than Hugh Evans. Let's plot the words of both speakers against each other.
+
+<!-- #Let's compare the vocabulary used by the speakers. Here is a list of words filtered by if the word is repeated more than 10 times by any speaker. (this should be deleted) -->
+
+
+<!-- ```{r, table6, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"} -->
+
+<!-- vocabulary <- -->
+<!--   tidy_talks %>% -->
+<!--   count(word, speaker, sort = TRUE) %>% -->
+<!--   group_by(word) %>% -->
+<!--   filter(sum(n) > 10) %>% -->
+<!--   ungroup() -->
+
+<!-- #kable(vocabulary[1:10,], align = "llr", col.names = c('Word', 'Speaker', 'Frequency'))%>% -->
+<!--  #   kable_styling(position = "center") -->
+
+<!-- ``` -->
+
+
+
+```{r plot3, fig.align='center', fig.height=5, fig.width=10, message=FALSE, warning=FALSE}
+#to plot the next plot, I have to load ggrepel library.
+library(ggrepel)
+
+#Now I'm going to plot each others top words against them to see the spread of words and their frequencies.
+#I'm using tokenized tidy data set for this
+tidy_talks %>%
+  #use count() function to count the number of each word repeated. But using "speaker" I can count the occurrences of word spoken by each speaker.
+  count(word, speaker, sort = TRUE) %>%
+  #group_by is used to support the next filter function.
+  group_by(word) %>%
+  #filter() function to only keep rows where the total of all word counts exceeds 10.
+  filter(sum(n) > 10) %>%
+  #remove grouping
+  ungroup() %>%
+  #use pivot_wider() function using word as the identification variable, speaker as the column variable, and n as the value variable, the data will be converted from long to wide format. Zeros will be used to fill in any missing data.
+  pivot_wider(names_from = "speaker", values_from = "n", values_fill = 0) %>%
+  #use ggplot to plot the graph where x axis is "JR" and y axis is "Hugh Evans"
+  ggplot(aes(`JR`, `Hugh Evans`)) +
+  #geom_abline to add a layer with a red diagonal line.
+  geom_abline(color = "red", size = 1.2, alpha = 0.8, lty = 2) +
+  #geom_text_repel to the plot, which adds labels to the points with words and, with a max.overlaps value of 25, minimizes label overlap.
+  geom_text_repel(aes(label = word), max.overlaps = 25) +
+  #fixed aspect ratio of the plot is defined by coord)fixed()
+  coord_fixed()
+
+
+```
+
+By this plot, we can understand how commonly are words used by both speakers. Most of the common words are in the frequency range of zero to ten. There are a couple of words that are placed in areas that are away from the speaker. Eg : Global, citizen, world, people, just and project.
+
+Next, we can start analyzing the sentiments. As a start, I'm going to use "bing" lexicons to get positive and negative sentiments. 
+
+```{r, table7, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+#Next I'm going to start sentiment analysis. First I'm using "bing" lexicons to analyse positive and negative sentiments.
+#I am assigning the sentiments into a new data set called "both_sentiments_bing".
+both_sentiments_bing <-
+  #Use tokenized tidy data set
+  tidy_talks %>%
+  #The get sentiments() method from the "tidytext" package is used to retrieve the "bing" sentiment lexicon, which is then combined with the tidy talks data frame using the inner join() function. Based on the word column, the join is carried out. This generates a new data frame with sentiment and value as additional columns.
+  inner_join(get_sentiments("bing"), by = "word") %>%
+  #count() is used to count the number of occurrences of each combination of speaker and sentiment.
+  count(speaker, sentiment) %>%
+  #pivot_wider() function is sing speaker as the identity variable, sentiment as the column variable, and n as the value variable, transform the data from long to wide format. Zeros will be used to fill in any missing data.
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0)
+
+
+#Same as in previous chunks, kable is used to print the table in r markdown.
+#Here I have used both_sentiments_bing as the data frame and To use book-style formatting, the booktabs option is set to TRUE.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(both_sentiments_bing, booktabs = TRUE, align = "lrr", col.names = c('Sentiment', 'Hugh Evans', 'JR'), caption = 'Sentiments of Hugh Evans and JR based on "bing" lexicon')%>%
+    kable_styling(position = "center", bootstrap_options = c("striped", "hover"))
+```
+
+Above table shows that Hugh Evans has both more positive and negative sentiments than JR. "Bing" lexicon only gives positive and negative sentiments. I'd like to expand the sentiments into more categories in order to analyze further. Therefore, I'm going to use "nrc" lexicon to analyze both speakers sentiments.
+
+
+```{r, table8, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+#Next, I'm using "nrc" lexicon to further analyze the sentiments in multiple categories.
+both_sentiments <-
+  #Use tokenized tidy data set
+  tidy_talks %>%
+  #The get sentiments() method from the "tidytext" package is used to retrieve the "nrc" sentiment lexicon, which is then combined with the tidy talks data frame using the inner join() function. Based on the word column, the join is carried out. This generates a new data frame with sentiment and value as additional columns.
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  #count() is used to count the number of occurrences of each combination of speaker and sentiment.
+  count(speaker, sentiment) %>%
+  #pivot_wider() function is sing speaker as the identity variable, sentiment as the column variable, and n as the value variable, transform the data from long to wide format. Zeros will be used to fill in any missing data.
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0)
+
+#Same as in previous chunks, kable is used to print the table in r markdown.
+#Here I have used both_sentiments as the data frame and To use book-style formatting, the booktabs option is set to TRUE.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(both_sentiments, booktabs = TRUE, align = "lrr", col.names = c('Sentiment', 'Hugh Evans', 'JR'), caption = 'Sentiments of Hugh Evans and JR based on "nrc" lexicon ')%>%
+    kable_styling(position = "center", bootstrap_options = c("striped", "hover"))
+```
+
+In both speakers' TED talks, positive sentiments take the lead, and disgust sentiments are the lowest. Anticipation and trust sentiments are more common in the two speakers' vocabulary. However, the tables show that Hugh Evans has more negative sentiments than JR while JR has more fear and sadness sentiments than Hugh Evans.
+
+
+
+## Results
+
+<!-- This should be the section where you present your results with a clear interpretation. Your results are expected to include tables and visualization. Well-presented results with clear and *good interpretations* are key factors of gaining higher marks. *Your R code should be included within code chunks like the one below and should be* **clearly commented/annotated** *throughout*. The R code **should NOT appear in your html output file**, only to be included in your R markdown source file (i.e. you should keep `echo = FALSE` in the setup R chunk in the begining of the document) -->
+
+In this section, I am going to calculate the odds ratio and confidence intervals. This can be used to measure the strength of a word's association. First, let's consider OR value. When the OR value is greater than 1, it means one speaker has more particular sentiments than the other speaker. When it's equal to 1, it means both speakers have the same amount of sentiment. Lastly, when it's less than 1, the previous speaker has fewer sentiments than the later speaker. By looking at the Odds Ratio(OR) values below table, I can say that surprise, joy, sadness, trust, and positive sentiments are higher in JR's TED talks, while fear, anticipation, anger, and negative and disgust sentiments are common in Hugh Evan's TED talks.
+
+
+```{r, table9, message=FALSE, warnings = FALSE, results='asis', layout="l-body-outset"}
+
+#Below function is used to compute odd ratio. It allows to pass two sets of counts as numerator and denominator to calculate odds ratio.
+compute_OR <- function(numerator, denominator, correction = TRUE){
+  #The function adds the Yates' continuity correction to the counts if correction is TRUE.
+  if(correction){
+    #The ratio of the numerator's odds to the denominator's odds is used to calculate the OR.
+    ODDS_N = (numerator + 0.5) / (sum(numerator) - numerator + 0.5)
+    ODDS_D = (denominator + 0.5) / (sum(denominator) - denominator + 0.5)
+  } else {
+    ODDS_N = numerator / (sum(numerator) - numerator)
+    ODDS_D = denominator / (sum(denominator) - denominator)
+  }
+  OR = ODDS_N/ODDS_D
+}
+
+#Next I'm going to apply above function into the data set and get the OR values as a column in a new data frame called "talks_sentiments".
+talks_sentiments <-
+  #use tokenized data set.
+  tidy_talks %>% 
+  #The get sentiments() method from the "tidytext" package is used to retrieve the "nrc" sentiment lexicon, which is then combined with the tidy talks data frame using the inner join() function. Based on the word column, the join is carried out. This generates a new data frame with sentiment and value as additional columns.
+  inner_join(get_sentiments("nrc"), by = "word", multiple = "all") %>%
+  #count() is used to count the number of occurrences of each combination of speaker and sentiment.
+  count(speaker, sentiment) %>%
+  #pivot_wider() function is sing speaker as the identity variable, sentiment as the column variable, and n as the value variable, transform the data from long to wide format. Zeros will be used to fill in any missing data.
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0) %>%
+  #then use mutate() to create a new column called "OR" and use compute_OR function for sentiment counts of "JR" and "Hugh Evans" and reorder() function is used to order the feelings according to the corresponding odds ratio.
+  mutate(OR = compute_OR(`JR`, `Hugh Evans`, correction = FALSE) , sentiment = reorder(sentiment, OR)) %>%
+  #finally, arrange() function is used to arrange in descending order by OR.
+  arrange(desc(OR))
+
+#Next functionis to compute confidence interval for log(OR) to get the lower and upper levels of confidence intervals to know the range of where TRUE values can be fallen 95%.
+#This function uses the log values of OR, counts of sentiments of speakers as numerator and denominator as inputs.
+CI_log_OR <- function(log_OR, numerator, denominator, sig = 0.05, upper = TRUE){
+  #First Standard Error(SE) os calculated according to the below equation.
+  SE = sqrt(1/numerator + 1/(sum(numerator) - numerator) + 1/denominator + 1/(sum(denominator) - denominator))
+  #Then sets the upper value of confidence interval according to the equation "log_OR + qnorm(sig/2) * SE". 
+  #"sig" determines the level of significance (default is 0.05).
+  if(upper){
+    return(log_OR + qnorm(sig/2) * SE)
+  } else {
+  #if upper is set to false lower level of CI is calculated according to below equation.
+    return(log_OR - qnorm(sig/2) * SE)
+  }
+  #The function returns the upper and lower values of CI.
+}
+
+#Let's apply the function to calculate the CI. I am using previous data frame which has "OR" column.
+talks_sentiments %>%
+  #use mutate to create new columns of log_OR, CI.upper and CI.lower.
+  #first specify the log_OR column by calculating log values of the OR column and assign to "logOR" column.
+  #Then use above "CI_log_OR" function to calculate CI.lower and CI.upper and assign to respective columns. Pass "log_OR", JR" and "Hugh Evans" to the "CI_log_OR" function. For CI.lower, specify upper to be FALSE.
+  mutate(log_OR = log(OR), CI.lower = CI_log_OR(log_OR, `JR`, `Hugh Evans`, upper = FALSE), CI.upper = CI_log_OR(log_OR, `JR`, `Hugh Evans`)) %>%
+  #Then arrange the data frame in descending order of log_OR
+  arrange(desc(log_OR)) %>%
+  #Next I want to show the details in a table. I used the same formatting options as in chunk table1.
+  kable(booktabs = TRUE, align = "lrrrrrr", col.names = c('Sentiment', 'Hugh Evans', 'JR', 'OR', 'Log OR', 'CI Lower', 'CI Upper'))%>%
+    kable_styling(position = "center", bootstrap_options = c("striped", "hover"))
+
+
+#kable(talks_sentiments, align = "lrrrrrr", col.names = c('Sentiment', 'Hugh Evans', 'JR', 'OR', 'Log OR', 'CI Lower', 'CI Upper'), caption = 'CI lower and upper of the sentiments of Hugh Evans and JR')%>%
+ #   kable_styling(position = "center")
+
+```
+
+There can be scenarios where the sentiment is assigned randomly. Therefore, it's general to calculate confidence interval(CI) which gives a range with upper and lower level where 95% of true values falls under that range. In this, the upper bound relates to positive sentiments, while the lower bound relates to negative sentiments. 
+
+To calculate CI for sentiment analysis, we use the log value of the OR. After obtaining the log(OR), the standard error(SE) for the log(OR) is calculated. After that, to compute the CI, a function is written using the log(OR) value and adding the product of the standard normal distribution value and SE. The function finds the upper and lower limits of the confidence interval. The above table displays the final results. 
+
+According to the above table, "surprise" has the strongest association with positive sentiments, while "disgust" has the most intensive association with negative sentiments. Overall, all the sentiments in the data set show a greater likelihood to be related to negative sentiments than positive sentiments. It means JR has more words impacting each sentiment than Hugh Evans had in his speech.
+
+Let's plot the association between the log odds ratio and the sentiments to present the data in a more attention-grabbing way.
+
+
+```{r plot4, fig.align='center', fig.height=4, fig.width=12, message=FALSE, warning=FALSE}
+
+#Now I want to plot to show the association between sentiment and the log odds ratio (OR).
+#First plot is to plot OR values and see what sentiments have negative and positive sentiments.
+p4 <-
+  #Use same steps as previous chunk to get the log_OR value using compute_OR function.
+  tidy_talks %>% 
+  inner_join(get_sentiments("nrc"), by = "word", multiple = "all") %>%
+  count(speaker, sentiment) %>%
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0) %>%
+  mutate(OR = compute_OR(`JR`, `Hugh Evans`, correction = FALSE) , log_OR = log(OR), sentiment = reorder(sentiment, log_OR)) %>%
+  #Next I'm using ggplot to draw the bar chart.log_OR and sentiments are passing as x and y axis values while color is based on if log_OR value is negative or positive.
+  ggplot(aes(log_OR, sentiment, fill = log_OR <0)) + 
+  #I specified show.legend to be "TRUE" because I want to display the legend.
+  geom_col(show.legend = TRUE) +
+  #Specified what should display as y axis label.
+  ylab(label = "Sentiment") + 
+  #Specified what should display as x axis label.
+  xlab(label = "Log odds ratio") + 
+  #Added a title to the plot.
+  ggtitle("The association between sentiments and OR") +
+  #The plot title's size and location can be adjusted using the theme() method.
+  theme(plot.title = element_text(hjust = 0.5, size = 10))
+
+#Next, I want to plot the CI
+p5 <-
+  #Followed the same process as previous chunk to calculate CI.upper and CI.lower levels
+  talks_sentiments %>%
+  mutate(log_OR = log(OR), CI.lower = CI_log_OR(log_OR, `JR`, `Hugh Evans`, upper = FALSE), CI.upper = CI_log_OR(log_OR, `JR`, `Hugh Evans`)) %>%
+  mutate(sentiment = reorder(sentiment, log_OR)) %>%
+  #Use ggplot to plot the chart and use aes to determine the x axis and y axis values.
+  ggplot(aes(sentiment, log_OR)) +
+  #geom_point() function is used to create the scatter plot.
+  geom_point() +
+  #geom_errorbar() function is used to create the error bars.
+  geom_errorbar(aes(ymin = CI.lower, ymax = CI.upper)) +
+  #To show where the OR is not important, a horizontal dashed line is drawn at y=0 using the geom hline() function.
+  geom_hline(yintercept=0, linetype="dashed", color="blue", size=1) +
+  #Define y axis label
+  ylab("Log odds ratio") + 
+  #Define x axis label
+  xlab("Sentiment") + 
+  #Add plot title
+  ggtitle("The association between sentiments using CI") +
+  #The coord flip command flips the plot ()
+  coord_flip() +
+  #The plot title's size and location can be adjusted using the theme() method.
+  theme(plot.title = element_text(hjust = 0.5, size = 10))
+
+#I wanted to have the above two plots side by side. Therefore, I am using grid.arrange function to combine the plots side by side.
+#p4 and p5 plots are specified to be placed sided by side in the same and in 2 columns.
+grid.arrange(p4, p5, ncol = 2)
+```
+
+As depicted in the above table with CI.Upper and CI.Lower levels, we can say that JR and Hugh Evans share the same amount of words related to some sentiments such as fear, anticipation, and positive. According to the sentiments given to each word, we can assess which particular words are accountable for these tendencies. Below are the six words responsible for negative and positive sentiments, respectively.
+
+
+```{r table 10, message=FALSE, warning=FALSE}
+
+#Next, I'm trying to gain some insights by specifically analyzing positive and negative sentiments and what words have contributed in these sentiments.
+negatives <-
+  #Follow the same process to compute OR and get sentiments using "nrc" lexicons.
+  tidy_talks %>%
+  count(word, speaker) %>%
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0) %>%
+  mutate(OR = compute_OR(`JR`, `Hugh Evans`, correction = FALSE) ) %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  #filter() only negative sentiments and collaborative each word's count of JR and Hugh Evans is more than 4.
+  filter(sentiment == "negative" & `JR` + `Hugh Evans` > 4) %>%
+  #Then arrange the data frame in descending order of log_OR
+  arrange(desc(OR))
+
+positives <-
+  #Same as above but filter "positive" sentiments.
+  tidy_talks %>%
+  count(word, speaker) %>%
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0) %>%
+  mutate(OR = compute_OR(`JR`, `Hugh Evans`, correction = FALSE) ) %>%
+  inner_join(get_sentiments("nrc"), by = "word") %>%
+  filter(sentiment == "positive" & `JR` + `Hugh Evans` > 7) %>%
+  arrange(desc(OR))
+
+#Merge both negative and positive sentiments using bind_rows() and create "compare_sentiments" data set.
+compare_sentiments <- bind_rows(negatives, positives)
+
+#Same as in previous chunks, kable is used to print the table in r markdown.
+#Here I have used compare_sentiments as the data frame and To use book-style formatting, the booktabs option is set to TRUE.
+#Rest of the formatting and styling attributes follows the same method as chunk table1.
+kable(compare_sentiments, booktabs = TRUE, align = "lrrrc", col.names = c('Word', 'JR', 'Hugh Evans', 'OR', 'Sentiment'))%>%
+    kable_styling(position = "center", bootstrap_options = c("striped", "hover"))
+
+
+```
+
+For visual representations, let's plot and see which words are accountable for the sentiments and their frequencies.
+
+
+```{r plot5, fig.align='center', fig.height=6, fig.width=12, message=FALSE, warning=FALSE}
+
+#Lastly, I'm going to put together a visual representation of the relationship between the speaker's words and the number of various sentiments.
+
+#First I declare a vector os sentiments called "associated sentiments".
+associated_sentiment <- c("trust", "sadness", "anticipation", "surprise", "joy", "positive", "fear", "disgust", "anger", "negative")
+
+
+sentiment_talks <-
+  #Follow the same processes of getting sentiments and create a new data frame to include columns for the speaker, sentiment, and word, as well as columns for the count of each word by each speaker.
+  tidy_talks %>%
+  inner_join(get_sentiments("nrc"), by = "word", multiple = "all") %>%
+  count(speaker, sentiment, word) %>%
+  #Get the longer format of the new data frame created to reshape the data so that each speaker's counts for each word.
+  pivot_wider(names_from = speaker, values_from = n, values_fill = 0) %>%
+  #Use mutate and compute OR function to add OR and log_OR columns to the data frame.
+  mutate(OR = compute_OR(`JR`, `Hugh Evans`, correction = FALSE) , log_OR = log(OR), sentiment = reorder(sentiment, log_OR)) %>%
+  filter(`JR` + `Hugh Evans` > 3 & abs(log_OR) > -0.8 & sentiment %in% associated_sentiment) %>%
+  #Filters the data to only include terms where the absolute value of the log OR is larger than 0.8 and the sum of the JR and Hugh Evans counts is greater than 3.
+  mutate(word = reorder(word, log_OR), sentiment = factor(sentiment, levels = associated_sentiment, ordered = TRUE)) %>%
+  #then create the plot using ggplot() function specifying aes for x axis, y axis and levels to be used in fill color. 
+  ggplot(aes(word, log_OR, fill = log_OR < 0)) + 
+  #set show.legend to TRUE to display the legend.
+  geom_col(show.legend = TRUE) +
+  #Use facet_wrap to plot multiple plots, in this case for each sentiment. These plots are displayed in 2 rows(nrow =2). scales = "free x" instructs ggplot to modify the x-axis scales for each plot to suit the data contained therein.
+  facet_wrap(~ sentiment, scales = "free_x", nrow = 2) +
+  #Define y axis label
+  labs(y = "Log odds ratio") +
+  #Define x axis label
+  labs(x = "Words") + 
+  #Define plot title
+  ggtitle("The association between speaker's words and counts of the sentiments") +
+  #Theme is used to angle and align the x-axis labels to the right ()
+  theme(axis.text.x = element_text(angle = 30, hjust = 1, size = 12)) +
+  #Center the title of the plot.
+  theme(plot.title = element_text(hjust = 0.5))
+
+sentiment_talks
+```
+
+All 3 speeches were related to initiatives to change the world and help end global poverty. Overall, the 3 speeches had positive sentiments, such as how they achieved specific goals in their initiatives, which also contributed to anticipation sentiments. The same negative and sad sentiments can be highlighted too as anger towards the government and the sad side of the world were also addressed in the TED talks. To conclude, I can say that the sentiment analysis carried out above is suitable to make a fair judgement about the 3 TED talks.
